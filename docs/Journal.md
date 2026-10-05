@@ -6,7 +6,7 @@
 
 ## 👋 Présentation
 
-Ce journal retrace le projet de homelab de **[Prénom]**, étudiant en 4ᵉ année d'ingénieur en sécurité et qualité des réseaux à **[École]**.
+Bonjour à toutes et à tous ! Je m'appelle Théo et je suis étudiant en deuxième année du cycle ingénieur en informatique à Polytech Dijon, spécialisé en sécurité et qualité des réseaux. À travers ce journal, je partage l'ensemble des étapes de conception et de déploiement de mon homelab.
 
 Le projet est né d'une envie simple : **apprendre en mettant en pratique** les notions vues en cours sur une infrastructure réelle, conçue, installée et administrée de bout en bout. Il fera l'objet d'une présentation lors de la soutenance de fin d'année, mais il est avant tout mené par intérêt personnel pour le réseau et la sécurité.
 
