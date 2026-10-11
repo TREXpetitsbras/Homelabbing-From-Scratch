@@ -139,8 +139,9 @@ Log in as `root`. Console menu:
 LAN (em0)  -> v4: 192.168.10.1/24
 WAN (ue0)  -> v4/DHCP4: 192.168.1.x/24
 ```
+<img width="1600" height="733" alt="Console_Header" src="https://github.com/user-attachments/assets/2990b5cc-ddb7-455d-886d-ea4e44cfdb9b" />
 
-<!-- 📸 Image idea: console header with LAN/WAN addresses (blur the IPv6 lines: they contain the public prefix and the MAC address) -->
+
 
 ---
 
