@@ -24,7 +24,7 @@
 | 7 | [First web login](#7-first-web-login) | ✅ |
 | 8 | [Snapshots & updates](#8-snapshots--updates) | ✅ |
 | 9 | [Setup wizard](#9-setup-wizard) | ✅ |
-| 10 | [Hardening & backup](#10-hardening--backup) | 🕓 |
+| 10 | [Hardening & backup](#10-hardening--backup) | ✅ |
 | 11 | [VLANs & DHCP](#11-vlans--dhcp) | 🕓 |
 | 12 | [Firewall rules](#12-firewall-rules) | 🕓 |
 | 13 | [Cut-over (Freebox bridge mode)](#13-cut-over-freebox-bridge-mode) | 🕓 |
@@ -292,7 +292,83 @@ service devd restart
 
 ## 10. Hardening & backup
 
-🕓 *To be completed: web GUI on LAN only (HTTPS), SSH disabled, console menu password, named admin account with TOTP, encrypted `config.xml` export stored outside the repository.*
+### 10.1 Administration access — *System → Settings → Administration*
+
+| Section | Setting | Value |
+|---|---|---|
+| Web GUI | Protocol | **HTTPS** |
+| Web GUI | TCP port | 443 (unchanged) |
+| Web GUI | Session timeout | **30** min |
+| Web GUI | DNS rebind check | Enabled (default) |
+| Web GUI | **Listen interfaces** | **LAN only** (VLAN 10 later) |
+| Secure Shell | Enable Secure Shell | **Unchecked** |
+| Console | Password protect the console menu | **Checked** |
+
+> Keep the **anti-lockout rule** until the Management VLAN is in place.
+
+### 10.2 Named admin account — *System → Access → Users → +*
+
+| Field | Value |
+|---|---|
+| Username | Personal username (not `root`) |
+| Password | Strong, different from root, stored in a password manager |
+| Group membership | **admins** |
+
+Log out and log back in with this account to validate it.
+
+### 10.3 Two-factor authentication (TOTP)
+
+**1. Create the TOTP server** — *System → Access → Servers → +*
+
+| Field | Value |
+|---|---|
+| Descriptive name | `TOTP` |
+| Type | **Local + Timebased One Time Password** |
+| Token length | **6** |
+| Reverse token order | **Checked** → enter `password` then `code` in the same field |
+
+**2. Enrol the account** — *System → Access → Users → (your account)*
+
+- *OTP seed* → **Generate new secret** → Save.
+- Reopen the account → *Click to unhide* → scan the QR code with an authenticator app (**2FAS** used here).
+
+> ⚠️ The QR code **is** the secret. Never screenshot or share it.
+
+**3. Test before enforcing** — *System → Access → Tester*
+
+| Field | Value |
+|---|---|
+| Authentication Server | TOTP |
+| Username | Your account |
+| Password | `<password><6-digit code>` (no space) |
+
+Expected: **User authenticated successfully**. Do not continue otherwise.
+
+**4. Enforce** — *System → Settings → Administration → Authentication → Server*: select **TOTP** only, deselect *Local Database* → Save.
+
+**5. Verify** in a private browser window **without closing the current session**.
+
+> Side effect (intended): `root` has no TOTP seed, so it can no longer log in to the web GUI — only from the physical console.
+
+### 10.4 Recovery (locked out of the web GUI)
+
+| Console option | Effect |
+|---|---|
+| **3** — Reset the root password | New root password |
+| **2** — Set interface IP address → *Restore web GUI access defaults? → y* | Resets web GUI access settings |
+| *System → Snapshots* (if GUI reachable) | Roll back to `before-hardening` |
+
+Also keep an encrypted export of the TOTP secrets from the authenticator app.
+
+### 10.5 Configuration backup
+
+*System → Configuration → Backups*:
+
+1. Check **Encrypt this configuration file** + strong password (password manager).
+2. **Download configuration**.
+3. Store it **outside the Git repository** (personal cloud, USB key).
+
+> Snapshots live on the same NVMe: only an external, encrypted `config.xml` protects against a disk failure.
 
 ## 11. VLANs & DHCP
 
