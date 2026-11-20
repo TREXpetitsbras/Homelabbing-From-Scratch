@@ -367,6 +367,73 @@ Un snapshot ZFS est un environnement de démarrage complet : en cas de problème
 | Block bogon networks | Activé | Rejette les plages d'adresses qui ne devraient jamais circuler sur Internet |
 | LAN | `192.168.10.1/24` | Inchangé |
 
+#### 5.7 Durcissement et sauvegarde
+ 
+Le durcissement consiste à **réduire la surface d'attaque** du firewall : fermer tout ce qui n'est pas nécessaire, et protéger fortement ce qui reste ouvert. Les parties A, B et C sont terminées ✅. Elles répondent à trois questions : **d'où** peut-on administrer le firewall, **qui** l'administre, et **comment le prouver**.
+ 
+**A. D'où : l'accès à l'administration** (*System → Settings → Administration*)
+ 
+| Réglage | Valeur | Justification |
+|---|---|---|
+| Protocole de l'interface web | HTTPS | Les échanges sont chiffrés, mot de passe compris |
+| Port | 443 (inchangé) | Changer de port relève de la sécurité par l'obscurité et n'apporte rien de réel |
+| Expiration de session | 30 minutes | Une session oubliée se ferme d'elle-même |
+| *Listen interfaces* | **LAN uniquement** | L'interface d'administration n'est jamais exposée côté WAN. Elle passera ensuite sur le VLAN 10 Management |
+| *DNS rebind check* | Activé | Protège contre une attaque qui utilise le navigateur pour atteindre l'interface |
+| SSH | **Désactivé** | Inutile pour l'instant : un service fermé ne peut pas être attaqué |
+| Menu de la console | **Protégé par mot de passe** | Un clavier branché sur le Tiny ne donne plus accès au menu sans authentification |
+ 
+La règle *anti-lockout*, qui empêche de se bloquer soi-même hors de l'interface depuis le LAN, a été conservée.
+ 
+**B. Qui : un compte administrateur nominatif**
+ 
+Le compte `root` existe sur toutes les installations d'OPNsense. L'utiliser au quotidien pose trois problèmes :
+ 
+1. **L'identifiant est connu d'avance.** Un attaquant n'a plus qu'une inconnue à trouver, le mot de passe. Avec un compte personnel, il doit deviner l'identifiant **et** le mot de passe.
+2. **Les journaux sont anonymes.** Une action enregistrée sous `root` ne dit pas qui l'a effectuée. Les comptes nominatifs assurent la **traçabilité** (ou imputabilité), une règle de base en entreprise.
+3. **L'usage courant et l'accès de secours doivent être séparés.** Le compte personnel sert au quotidien. `root` est conservé comme une clé de secours, utilisable uniquement depuis la console physique.
+ 
+Un compte personnel a donc été créé dans le groupe **admins**, avec les mêmes droits que `root` dans l'interface web et un mot de passe distinct.
+ 
+**C. Comment le prouver : la double authentification (TOTP)**
+ 
+Une authentification forte combine des facteurs de **natures différentes** :
+ 
+| Facteur | Exemple | Utilisé ici |
+|---|---|---|
+| Ce que l'on **sait** | Un mot de passe | ✅ Mot de passe du compte |
+| Ce que l'on **possède** | Un téléphone, une clé physique | ✅ Téléphone avec l'application **2FAS** |
+| Ce que l'on **est** | Une empreinte digitale | — |
+ 
+Pour se connecter, un attaquant devrait à la fois connaître le mot de passe **et** disposer du téléphone.
+ 
+**Le fonctionnement de TOTP** (*Time-based One-Time Password*) :
+ 
+1. **Le secret partagé.** En scannant un QR code, le téléphone et OPNsense enregistrent la même clé secrète. C'est le seul moment où elle circule.
+2. **Le calcul indépendant.** Toutes les 30 secondes, chacun combine cette clé avec l'heure courante à travers une fonction cryptographique, et obtient le même code à six chiffres, sans jamais communiquer avec l'autre.
+3. **La vérification.** À la connexion, OPNsense compare le code saisi avec celui qu'il a calculé.
+ 
+Conséquences : le téléphone n'a pas besoin d'Internet, un code intercepté expire en une trentaine de secondes, les horloges doivent être synchronisées (d'où l'importance du NTP), et **le QR code ne doit jamais être diffusé**, puisqu'il contient le secret.
+ 
+| Menace | Sans TOTP | Avec TOTP |
+|---|---|---|
+| Mot de passe deviné par force brute | Accès obtenu | Bloqué |
+| Mot de passe réutilisé, divulgué lors d'une fuite sur un autre site | Accès obtenu | Bloqué |
+| Logiciel espion enregistrant les frappes clavier | Accès durable | Code expiré en 30 secondes |
+| Regard par-dessus l'épaule | Accès obtenu | Bloqué |
+ 
+**Mise en œuvre :**
+ 
+1. Création d'un serveur d'authentification de type *Local + Timebased One Time Password* (*System → Access → Servers*), avec des codes de six chiffres et l'ordre « mot de passe puis code ».
+2. Génération du secret TOTP sur le compte personnel, puis association avec **2FAS**, une application open source.
+3. **Test avant activation** avec le testeur intégré (*System → Access → Tester*) : l'authentification doit réussir avant toute bascule.
+4. Activation du serveur TOTP comme unique méthode d'authentification de l'interface web, puis vérification dans une fenêtre de navigation privée, sans fermer la session en cours.
+ 
+Comme `root` n'a pas de secret TOTP, il ne peut plus se connecter à l'interface web : il reste utilisable **uniquement depuis la console physique**. En cas de blocage, la console permet de réinitialiser le mot de passe root (option 3) et de restaurer les accès par défaut à l'interface web (option 2).
+ 
+**Niveau de risque, en toute honnêteté.** L'interface n'écoutant que sur le LAN, elle est inaccessible depuis Internet. Le risque résiduel est celui d'un **appareil compromis sur le réseau local**, par exemple un objet connecté piraté. C'est précisément le scénario contre lequel la segmentation en VLAN et le TOTP se complètent. Le TOTP n'est pas indispensable dans un homelab, mais il est gratuit, rapide à mettre en place, et c'est la norme en entreprise pour tout accès d'administration.
+ 
+**Contreparties :** la perte du téléphone empêche la connexion à l'interface web. Parades : une sauvegarde chiffrée des secrets exportée depuis 2FAS, et en dernier recours la console physique.
 
 ### 6. Problèmes rencontrés et solutions
 
@@ -405,3 +472,35 @@ C'est le principal problème rencontré sur ce chapitre. Sa résolution a suivi 
 - installer une carte réseau PCIe : impossible sur le M710q, qui n'a pas d'emplacement prévu à cet effet.
 
 ---
+
+### 7. Ce que j'ai appris
+ 
+- **Raisonner sur la chaîne complète.** Le débit réel est celui du maillon le plus lent. Un composant plus rapide n'apporte rien s'il est isolé dans une chaîne plus lente.
+- **La puce compte plus que la marque.** Sur FreeBSD, la compatibilité d'une carte réseau dépend de son contrôleur et du driver associé, ce qui impose de vérifier les spécifications avant d'acheter.
+- **Faire des compromis explicites.** Chaque choix (débit contre stabilité, simplicité contre séparation physique) a été documenté avec ses avantages et ses limites.
+- **La sécurité se construit dès l'architecture.** La séparation physique WAN/LAN supprime une classe entière d'erreurs de configuration, au lieu de compter sur une configuration sans faille.
+- **Intégrité n'est pas authenticité.** Un hash prouve qu'un fichier n'a pas été altéré, pas qu'il provient bien de l'éditeur. Seule une signature apporte cette garantie.
+- **Les réglages de sécurité peuvent se contredire.** Un mot de passe au démarrage protège la machine, mais empêcherait le firewall de redémarrer seul après une coupure. La disponibilité fait aussi partie de la sécurité.
+- **« Supporté » ne veut pas dire « stable ».** Un matériel listé comme compatible peut se révéler instable en pratique. Les rapports de bug et les retours d'utilisateurs valent autant que la documentation officielle.
+- **Diagnostiquer par couches et par élimination.** Séparer le physique, la liaison, le réseau et le DNS, puis ne changer qu'un seul paramètre à la fois. Le test croisé (le même adaptateur sous Windows) a permis de localiser la cause en un seul essai.
+- **Se méfier du premier diagnostic.** L'hypothèse de l'ordre de démarrage semblait confirmée par un redémarrage réussi, alors qu'il s'agissait d'une coïncidence. Un symptôme qui disparaît n'est pas un problème résolu.
+- **Réduire la surface d'attaque avant de la protéger.** Le meilleur service à sécuriser est celui qui n'est pas exposé : interface d'administration limitée au LAN, SSH fermé.
+- **Séparer l'identité de la preuve.** Un compte nominatif dit *qui* administre, la double authentification *prouve* que c'est bien lui. Les deux répondent à des besoins différents : la traçabilité et l'authentification forte.
+- **Toujours tester avant de verrouiller.** Le TOTP a été validé avec le testeur intégré puis dans une fenêtre privée avant de désactiver l'ancienne méthode, en gardant la console physique comme accès de secours.
+- **Toujours prévoir le retour arrière.** Chaque étape risquée (bascule, mises à jour) est préparée avec un moyen de revenir en arrière : plan de retour pour la Freebox, snapshots ZFS, exports de configuration.
+- **Réduire la surface d'attaque avant de la protéger.** Le meilleur service à sécuriser est celui qui n'est pas exposé : interface d'administration limitée au LAN, SSH fermé.
+- **Séparer l'identité de la preuve.** Un compte nominatif dit *qui* administre, la double authentification *prouve* que c'est bien lui. Les deux répondent à des besoins différents : la traçabilité et l'authentification forte.
+- **Toujours tester avant de verrouiller.** Le TOTP a été validé avec le testeur intégré puis dans une fenêtre privée avant de désactiver l'ancienne méthode, en gardant la console physique comme accès de secours.
+ 
+---
+ 
+### 8. Perspectives 🔭
+ 
+| Évolution | Description | Point d'attention |
+|---|---|---|
+| **Suricata** | IDS (*Intrusion Detection System*, qui détecte et alerte) dans un premier temps, puis IPS (*Intrusion Prevention System*, qui bloque en temps réel) si les performances le permettent | Avec 2 cœurs, la charge CPU est à surveiller avant de passer en IPS |
+| **WireGuard** | VPN pour accéder au homelab à distance de façon sécurisée | Bénéficie de l'AES-NI du processeur et de l'IPv4 fullstack |
+| **Unbound** | Résolveur DNS intégré à OPNsense, utilisé comme serveur amont d'AdGuard/Pi-hole ou comme secours si le nœud Proxmox tombe | Évite que tout l'appartement perde la résolution DNS en cas de panne de Proxmox |
+| **IPv6** | Mise en service de l'IPv6 derrière la Freebox en bridge | Nécessite une délégation de préfixe configurée côté Freebox |
+| **Suppression du contournement `cdce`** | Revenir au pilote `axge` si le bug n° 267514 est corrigé dans une future version de FreeBSD | Vérifier les notes de version d'OPNsense. Le contournement fonctionne bien en attendant |
+| **Passage au 2,5 Gbps** | Exploiter pleinement le débit de la Freebox Pop | Il faudrait faire évoluer ensemble la carte réseau LAN, le switch et le CPU du firewall |
