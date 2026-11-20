@@ -269,7 +269,7 @@ Le port 5 est un filet de sécurité : en cas d'erreur de filtrage bloquant l'ac
 
 Tous les VLAN peuvent en outre interroger OPNsense pour la résolution DNS et la synchronisation de l'heure (NTP), et rien d'autre sur le firewall.
 
-**Le poste d'administration.** L'ordinateur portable personnel sert de poste d'administration depuis le LAN, **uniquement en filaire**. Une **réservation DHCP** associe l'adresse MAC de sa carte Ethernet à une adresse fixe, `10.0.20.50`, et une règle de filtrage autorise uniquement cette adresse à joindre le VLAN Management. En Wi-Fi, le portable reçoit une adresse dynamique ordinaire et n'a aucun accès à l'administration. Exiger un câble réduit encore la surface d'attaque : aucun accès d'administration ne transite par les ondes.
+**Le poste d'administration.** L'ordinateur portable personnel sert de poste d'administration depuis le LAN, **uniquement en filaire**. Une **réservation DHCP** associe l'adresse MAC de la carte Ethernet de son hub USB-C (puce ASIX) à une adresse fixe, `10.0.20.50`, et une règle de filtrage autorise uniquement cette adresse à joindre le VLAN Management. L'adresse MAC appartenant au hub et non au portable, la réservation suit le hub : en cas de changement de hub, elle doit être mise à jour. En Wi-Fi, le portable reçoit une adresse dynamique ordinaire et n'a aucun accès à l'administration. Exiger un câble réduit encore la surface d'attaque : aucun accès d'administration ne transite par les ondes.
 
 *Point d'attention :* en Wi-Fi, Windows peut utiliser des « adresses matérielles aléatoires », c'est-à-dire une adresse MAC inventée pour chaque réseau, pour protéger la vie privée. Une réservation DHCP sur une carte Wi-Fi exigerait donc de désactiver cette option. Le choix d'une administration uniquement filaire évite ce problème.
 
@@ -502,12 +502,42 @@ Comme `root` n'a pas de secret TOTP, il ne peut plus se connecter à l'interface
 
 La configuration complète (`config.xml`) a été exportée **chiffrée** depuis *System → Configuration → Backups* et stockée hors du dépôt GitHub. Un snapshot ZFS reste sur le même disque que le système : seul un export externe protège contre une panne du NVMe. Un snapshot `durcissement-ok` a également été créé. Après la dernière mise à jour, le contournement `cdce` a été vérifié depuis les journaux système (*System → Log Files → General*, filtres `axge-to-cdce` et `cdce0`).
 
+#### 5.8 Configuration des VLAN et du routage inter-VLAN 
+
+**Les sous-interfaces VLAN.** Les six VLAN ont été créés comme sous-interfaces étiquetées (802.1Q) de la carte Intel `em0`, qui deviendra le lien trunk vers le switch :
+
+| Périphérique | VLAN | Interface | Adresse |
+|---|---|---|---|
+| `vlan0.10` | 10 | MANAGEMENT | `10.0.10.1/24` |
+| `vlan0.20` | 20 | USERS (VLAN 20 « LAN ») | `10.0.20.1/24` |
+| `vlan0.30` | 30 | IOT | `10.0.30.1/24` |
+| `vlan0.40` | 40 | GUEST | `10.0.40.1/24` |
+| `vlan0.50` | 50 | SERVICES | `10.0.50.1/24` |
+| `vlan0.60` | 60 | LAB | `10.0.60.1/24` |
+
+Le VLAN 20 s'appelle `USERS` dans OPNsense pour éviter toute confusion avec l'interface `LAN` existante (`192.168.10.1`, non étiquetée), conservée temporairement comme accès d'administration pendant la migration. Les interfaces internes n'ont **aucune passerelle amont** : seule l'interface tournée vers Internet (WAN) en possède une. Dans le cas contraire, OPNsense traiterait l'interface comme une sortie vers l'extérieur.
+
+Les sous-interfaces VLAN cohabitent avec l'interface non étiquetée d'origine sur la même carte : leur création n'a eu aucun impact sur l'accès d'administration existant.
+
+**Le DHCP.** OPNsense 26.7 utilise **Dnsmasq** comme serveur DHCP par défaut (ISC et Kea sont désormais marqués comme anciens). Une plage dynamique `.100` → `.199` a été créée sur chaque VLAN. Dnsmasq annonce automatiquement l'adresse de l'interface (`10.0.X.1`) comme passerelle et comme serveur DNS, et c'est **Unbound** qui répond aux requêtes DNS. Dnsmasq écoute sur le port 53053 pour ne pas entrer en conflit avec lui.
+
+| Réglage Dnsmasq | Valeur | Justification |
+|---|---|---|
+| Interfaces | Les six VLAN et le LAN temporaire | **Jamais le WAN** : un serveur DHCP ne doit pas distribuer d'adresses côté Internet |
+| *DHCP register firewall rules* | Activé | Crée automatiquement les règles autorisant le DHCP, tout le reste étant bloqué par défaut |
+
+**La réservation du poste d'administration.** Dans *Dnsmasq → Hosts*, l'adresse MAC de la carte Ethernet du hub USB-C est associée à `10.0.20.50` (voir section 3.7).
+
+> [!NOTE]
+> Ces réglages ne peuvent pas encore être testés : le poste d'administration est branché directement sur `em0`, sans étiquette VLAN. Les tests auront lieu une fois le switch configuré avec son trunk. En l'absence de règles de filtrage sur les nouveaux VLAN, tout y est bloqué par défaut, à l'exception du DHCP.
+
 ### 6. Problèmes rencontrés et solutions
 
 | Problème | Cause | Solution |
 |---|---|---|
 | Risque de conflit d'adresses entre le WAN et le LAN pendant la préparation | Le LAN par défaut d'OPNsense (`192.168.1.1/24`) est dans le même réseau que celui distribué par la Freebox | Anticipé : LAN configuré en `192.168.10.1/24` dès l'installation |
 | L'interface de la Freebox peut devenir inaccessible une fois le mode bridge activé | Comportement signalé par plusieurs abonnés Free | Anticipé : retour arrière prévu via l'application Freebox Connect |
+
 
 #### Le lien WAN instable : diagnostic complet
 
@@ -537,6 +567,7 @@ C'est le principal problème rencontré sur ce chapitre. Sa résolution a suivi 
 - passer au *Router-on-a-Stick* intégral, avec le WAN dans un VLAN dédié sur le port Intel : aucun achat, mais une séparation WAN/LAN seulement logique ;
 - changer d'adaptateur, par exemple pour une puce Realtek avec le pilote `ure`, avec un risque similaire, les adaptateurs USB restant fragiles sous FreeBSD ;
 - installer une carte réseau PCIe : impossible sur le M710q, qui n'a pas d'emplacement prévu à cet effet.
+
 
 ---
 
@@ -574,3 +605,4 @@ C'est le principal problème rencontré sur ce chapitre. Sa résolution a suivi 
 | **Autorité de certification interne** | Créer une autorité de certification sur OPNsense (*System → Trust*), émettre un certificat pour l'interface web et importer l'autorité dans les postes d'administration | Supprime l'avertissement « Non sécurisé » du navigateur. Le chiffrement est déjà actif : seule l'identité du serveur n'est pas validée automatiquement |
 | **SSH par clé** | Réactiver SSH sur le réseau de management uniquement, authentification par clé ed25519, connexion root et mots de passe interdits | Permet le copier-coller des commandes sans rouvrir de surface d'attaque significative |
 | **Relais mDNS** | Permettre la diffusion depuis un téléphone (Chromecast, AirPlay) vers une TV placée dans un autre VLAN | Ces protocoles fonctionnent uniquement à l'intérieur d'un même réseau : un relais mDNS (plugin OPNsense) est nécessaire pour les faire traverser les VLAN. Inutile pour l'instant |
+| **VPN d'administration** | N'autoriser l'accès à l'administration qu'à travers un tunnel WireGuard, même depuis le LAN | La clé privée, stockée sur le poste, identifie la machine elle-même, et non plus seulement la carte réseau du hub comme le fait la réservation DHCP |
