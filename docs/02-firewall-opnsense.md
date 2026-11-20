@@ -25,7 +25,7 @@
 | 8 | [Snapshots & updates](#8-snapshots--updates) | ✅ |
 | 9 | [Setup wizard](#9-setup-wizard) | ✅ |
 | 10 | [Hardening & backup](#10-hardening--backup) | ✅ |
-| 11 | [VLANs & DHCP](#11-vlans--dhcp) | 🕓 |
+| 11 | [VLANs & DHCP](#11-vlans--dhcp) | ✅ |
 | 12 | [Firewall rules](#12-firewall-rules) | 🕓 |
 | 13 | [Cut-over (Freebox bridge mode)](#13-cut-over-freebox-bridge-mode) | 🕓 |
 | 14 | [Validation tests](#14-validation-tests) | 🕓 |
@@ -372,7 +372,55 @@ Also keep an encrypted export of the TOTP secrets from the authenticator app.
 
 ## 11. VLANs & DHCP
 
-🕓 *To be completed: VLAN sub-interfaces on `em0` (10, 20, 30, 40, 50, 60), gateways, one DHCP scope per VLAN.*
+> Take a snapshot (`before-vlan`) first. Creating tagged sub-interfaces does **not** affect the existing untagged LAN on `em0`.
+
+### 11.1 VLAN devices — *Interfaces → Devices → VLAN*
+
+| Device | Parent | Tag | Priority | Protocol | Description |
+|---|---|---|---|---|---|
+| `vlan0.10` | `em0` | 10 | Best Effort (0) | Automatic | MANAGEMENT |
+| `vlan0.20` | `em0` | 20 | Best Effort (0) | Automatic | USERS |
+| `vlan0.30` | `em0` | 30 | Best Effort (0) | Automatic | IOT |
+| `vlan0.40` | `em0` | 40 | Best Effort (0) | Automatic | GUEST |
+| `vlan0.50` | `em0` | 50 | Best Effort (0) | Automatic | SERVICES |
+| `vlan0.60` | `em0` | 60 | Best Effort (0) | Automatic | LAB |
+
+### 11.2 Assignments — *Interfaces → Assignments → +*
+
+In 26.7 the assignment form also holds the IP configuration.
+
+| Field | Value |
+|---|---|
+| Enabled / Lock | ✅ / ✅ |
+| Description | `MANAGEMENT`, `USERS`, `IOT`, `GUEST`, `SERVICES`, `LAB` |
+| Device | `vlan0.X` — ⚠️ **not** `em0` (pre-filled) |
+| Block private / bogon networks | Unchecked (internal networks) |
+| IPv4 Configuration Type | **Static IPv4** → `10.0.X.1` / **24** (⚠️ check the mask is not `/32`) |
+| IPv4 Upstream Gateway | `none` |
+| IPv6 Configuration Type | None |
+
+> ⚠️ **Save** then **Apply**. Verify in *Interfaces → Overview*: link type `static`, address `10.0.X.1/24`.
+
+### 11.3 DHCP — *Services → Dnsmasq DNS & DHCP*
+
+**General**
+
+| Setting | Value |
+|---|---|
+| Enable | ✅ |
+| Interface | The 6 VLANs + LAN (temporary). ⛔ **Never WAN** |
+| Listen port | `53053` (default — Unbound answers DNS on 53) |
+| DHCP register firewall rules | ✅ |
+
+**DHCP ranges** — one per VLAN: `10.0.X.100` → `10.0.X.199`. Gateway and DNS are announced automatically as `10.0.X.1`.
+
+**Hosts** (reservation for the admin workstation)
+
+| Host | IP | Hardware address |
+|---|---|---|
+| `admin-hub` | `10.0.20.50` | MAC of the USB-C hub Ethernet NIC (`aa:bb:cc:dd:ee:ff` format, colons) |
+
+> Not testable until the switch trunk is in place. New VLANs have no firewall rules yet: everything except DHCP is blocked.
 
 ## 12. Firewall rules
 
