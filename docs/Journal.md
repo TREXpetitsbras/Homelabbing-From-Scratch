@@ -435,6 +435,10 @@ Comme `root` n'a pas de secret TOTP, il ne peut plus se connecter à l'interface
  
 **Contreparties :** la perte du téléphone empêche la connexion à l'interface web. Parades : une sauvegarde chiffrée des secrets exportée depuis 2FAS, et en dernier recours la console physique.
 
+**D. Sauvegarde de la configuration**
+
+La configuration complète (`config.xml`) a été exportée **chiffrée** depuis *System → Configuration → Backups* et stockée hors du dépôt GitHub. Un snapshot ZFS reste sur le même disque que le système : seul un export externe protège contre une panne du NVMe. Un snapshot `durcissement-ok` a également été créé. Après la dernière mise à jour, le contournement `cdce` a été vérifié depuis les journaux système (*System → Log Files → General*, filtres `axge-to-cdce` et `cdce0`).
+
 ### 6. Problèmes rencontrés et solutions
 
 | Problème | Cause | Solution |
@@ -504,3 +508,5 @@ C'est le principal problème rencontré sur ce chapitre. Sa résolution a suivi 
 | **IPv6** | Mise en service de l'IPv6 derrière la Freebox en bridge | Nécessite une délégation de préfixe configurée côté Freebox |
 | **Suppression du contournement `cdce`** | Revenir au pilote `axge` si le bug n° 267514 est corrigé dans une future version de FreeBSD | Vérifier les notes de version d'OPNsense. Le contournement fonctionne bien en attendant |
 | **Passage au 2,5 Gbps** | Exploiter pleinement le débit de la Freebox Pop | Il faudrait faire évoluer ensemble la carte réseau LAN, le switch et le CPU du firewall |
+| **Autorité de certification interne** | Créer une autorité de certification sur OPNsense (*System → Trust*), émettre un certificat pour l'interface web et importer l'autorité dans les postes d'administration | Supprime l'avertissement « Non sécurisé » du navigateur. Le chiffrement est déjà actif : seule l'identité du serveur n'est pas validée automatiquement |
+| **SSH par clé** | Réactiver SSH sur le réseau de management uniquement, authentification par clé ed25519, connexion root et mots de passe interdits | Permet le copier-coller des commandes sans rouvrir de surface d'attaque significative |
