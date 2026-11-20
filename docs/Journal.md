@@ -176,7 +176,7 @@ flowchart LR
     SW --> V20["VLAN 20<br/>LAN"]
     SW --> V30["VLAN 30<br/>IoT"]
     SW --> V40["VLAN 40<br/>Invités"]
-    SW --> V50["VLAN 50<br/>DMZ"]
+    SW --> V50["VLAN 50<br/>Services"]
     SW --> V60["VLAN 60<br/>Lab isolé"]
 ```
 
@@ -188,11 +188,13 @@ flowchart LR
 | 20 | LAN | Postes et appareils personnels de confiance |
 | 30 | IoT | Objets connectés, isolés du reste |
 | 40 | Invités | Accès Internet uniquement |
-| 50 | DMZ | Services potentiellement exposés |
+| 50 | Services | Services hébergés sur Proxmox, accessibles uniquement depuis le réseau interne ou en VPN |
 | 60 | Lab isolé | Environnement de test, sans route vers les autres VLAN |
 
 > [!NOTE]
-> La configuration des ports du switch (trunk ou access) est documentée dans le chapitre **Switch**. Ce chapitre couvre la partie OPNsense : sous-interfaces, passerelles, DHCP et règles de filtrage inter-VLAN. Le DNS (AdGuard ou Pi-hole sur Proxmox) est traité dans le chapitre **Proxmox**.
+> Le VLAN 50 devait initialement être une **DMZ**, une zone destinée aux services exposés sur Internet. Aucun service ne sera exposé publiquement : l'accès à distance passera exclusivement par le VPN WireGuard. Le VLAN a donc été renommé **Services**. Exposer un service directement sur Internet augmente fortement la surface d'attaque, alors qu'un VPN n'expose qu'un seul port, chiffré et authentifié.
+
+Le plan d'adressage détaillé, l'attribution des ports du switch et la matrice des flux sont présentés en section 3.7. La configuration des ports du switch est documentée dans le chapitre **Switch**. Le DNS (AdGuard ou Pi-hole sur Proxmox) est traité dans le chapitre **Proxmox**.
 
 ---
 
@@ -211,6 +213,67 @@ Un système de fichiers définit la façon dont les données sont organisées et
 ZFS a été retenu pour deux raisons concrètes : la **résistance aux coupures de courant**, essentielle en l'absence d'onduleur, et les **snapshots**, qui permettent de revenir en arrière en quelques minutes avant une mise à jour majeure.
 
 **Limite :** avec un seul disque, ZFS ne protège pas contre une panne du NVMe lui-même, ce qui demanderait un second disque en miroir. L'export régulier de la configuration reste donc indispensable.
+
+---
+
+#### 3.7 Plan d'adressage, ports et matrice des flux
+
+**Règle d'adressage : `10.0.<VLAN>.0/24`.** Le numéro du VLAN devient le troisième octet de l'adresse : une adresse en `10.0.30.x` appartient donc forcément au VLAN 30 (IoT). Le plan est lisible au premier coup d'œil, ce qui limite les erreurs de configuration.
+
+**Pourquoi la plage `10.0.0.0/8` plutôt que `192.168.x.x` ?** Les plages `192.168.0.x` et `192.168.1.x` sont utilisées par la quasi-totalité des box, des hôtels et des réseaux publics. Lors d'une connexion au homelab en VPN depuis l'un de ces réseaux, un chevauchement d'adresses rendrait certaines machines injoignables. La plage `10.x`, bien moins utilisée par les réseaux grand public, évite ce problème et laisse en plus une grande marge pour de futurs VLAN.
+
+| VLAN | Nom | Sous-réseau | Passerelle |
+|---|---|---|---|
+| 10 | Management | `10.0.10.0/24` | `10.0.10.1` |
+| 20 | LAN | `10.0.20.0/24` | `10.0.20.1` |
+| 30 | IoT | `10.0.30.0/24` | `10.0.30.1` |
+| 40 | Invités | `10.0.40.0/24` | `10.0.40.1` |
+| 50 | Services | `10.0.50.0/24` | `10.0.50.1` |
+| 60 | Lab isolé | `10.0.60.0/24` | `10.0.60.1` |
+
+**Découpage de chaque sous-réseau :**
+
+| Plage | Usage |
+|---|---|
+| `.1` | Passerelle (OPNsense) |
+| `.2` → `.49` | Adresses fixes : infrastructure et serveurs |
+| `.50` → `.99` | Réservations DHCP : appareils à adresse stable |
+| `.100` → `.199` | DHCP dynamique |
+
+**Adresses de l'infrastructure (VLAN 10) :** OPNsense `.1`, switch `.2`, point d'accès Archer C7 `.3`, hôte Proxmox `.10`.
+
+**Attribution des ports du switch (TP-Link TL-SG608E) :**
+
+| Port | Branché sur | Mode | VLAN |
+|---|---|---|---|
+| 1 | OPNsense (`em0`) | Trunk | 10, 20, 30, 40, 50, 60 étiquetés |
+| 2 | Proxmox (Vivobook) | Trunk | 10 non étiqueté (hôte), 50 et 60 étiquetés (machines virtuelles) |
+| 3 | Point d'accès Archer C7 | Trunk | 10 non étiqueté (administration), 20, 30 et 40 étiquetés (un SSID par VLAN) |
+| 4 | Poste filaire | Access | 20 |
+| 5 | **Port de secours d'administration** | Access | 10 |
+| 6 | Lab physique | Access | 60 |
+| 7-8 | Libres | — | — |
+
+Le port 5 est un filet de sécurité : en cas d'erreur de filtrage bloquant l'accès à l'administration, un poste branché sur ce port se retrouve directement dans le VLAN Management.
+
+**Matrice des flux.** Tout est interdit par défaut, seul le strict nécessaire est autorisé (principe du moindre privilège) :
+
+| Source ↓ / Destination → | Management | LAN | IoT | Services | Lab | Internet |
+|---|---|---|---|---|---|---|
+| **Management** | — | ❌ | ❌ | ❌ | ❌ | ✅ |
+| **LAN** | ⚠️ poste d'administration uniquement | — | ❌ | ✅ | ❌ | ✅ |
+| **IoT** | ❌ | ❌ | — | ❌ | ❌ | ✅ |
+| **Invités** | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| **Services** | ❌ | ❌ | ✅ Home Assistant uniquement | — | ❌ | ✅ |
+| **Lab** | ❌ | ❌ | ❌ | ❌ | — | ❌ (règle temporaire activée à la demande) |
+
+Tous les VLAN peuvent en outre interroger OPNsense pour la résolution DNS et la synchronisation de l'heure (NTP), et rien d'autre sur le firewall.
+
+**Le poste d'administration.** L'ordinateur portable personnel sert de poste d'administration depuis le LAN, **uniquement en filaire**. Une **réservation DHCP** associe l'adresse MAC de sa carte Ethernet à une adresse fixe, `10.0.20.50`, et une règle de filtrage autorise uniquement cette adresse à joindre le VLAN Management. En Wi-Fi, le portable reçoit une adresse dynamique ordinaire et n'a aucun accès à l'administration. Exiger un câble réduit encore la surface d'attaque : aucun accès d'administration ne transite par les ondes.
+
+*Point d'attention :* en Wi-Fi, Windows peut utiliser des « adresses matérielles aléatoires », c'est-à-dire une adresse MAC inventée pour chaque réseau, pour protéger la vie privée. Une réservation DHCP sur une carte Wi-Fi exigerait donc de désactiver cette option. Le choix d'une administration uniquement filaire évite ce problème.
+
+En cas de perte du portable ou de problème de filtrage, le **port 5 du switch** (en mode access sur le VLAN 10) permet d'administrer le réseau depuis n'importe quel poste filaire.
 
 ---
 
@@ -510,3 +573,4 @@ C'est le principal problème rencontré sur ce chapitre. Sa résolution a suivi 
 | **Passage au 2,5 Gbps** | Exploiter pleinement le débit de la Freebox Pop | Il faudrait faire évoluer ensemble la carte réseau LAN, le switch et le CPU du firewall |
 | **Autorité de certification interne** | Créer une autorité de certification sur OPNsense (*System → Trust*), émettre un certificat pour l'interface web et importer l'autorité dans les postes d'administration | Supprime l'avertissement « Non sécurisé » du navigateur. Le chiffrement est déjà actif : seule l'identité du serveur n'est pas validée automatiquement |
 | **SSH par clé** | Réactiver SSH sur le réseau de management uniquement, authentification par clé ed25519, connexion root et mots de passe interdits | Permet le copier-coller des commandes sans rouvrir de surface d'attaque significative |
+| **Relais mDNS** | Permettre la diffusion depuis un téléphone (Chromecast, AirPlay) vers une TV placée dans un autre VLAN | Ces protocoles fonctionnent uniquement à l'intérieur d'un même réseau : un relais mDNS (plugin OPNsense) est nécessaire pour les faire traverser les VLAN. Inutile pour l'instant |
